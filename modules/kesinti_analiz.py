@@ -100,15 +100,18 @@ class KesintiAnaliz:
                     temp = [simdiki]
                     continue
                 
-                # İç içe
-                if simdiki['Baslama'] <= onceki['Bitis']:
+                # Önceki kesintinin GERÇEK (maksimum) bitiş zamanını al
+                onceki_gercek_bitis = self.kesinti_max_bitis.get(onceki['KesintiNo'], onceki['Bitis'])
+                
+                # İç içe (gerçek bitiş zamanına göre)
+                if simdiki['Baslama'] <= onceki_gercek_bitis:
                     temp.append(simdiki)
                 # Ard arda (dinamik tolerans)
                 else:
-                    # Önceki kesintinin süresine göre tolerans belirle
-                    tolerans_dk = self._tolerans_hesapla(onceki)
+                    # Önceki kesintinin süresine göre tolerans belirle (gerçek bitiş ile)
+                    tolerans_dk = self._tolerans_hesapla_gercek_bitis(onceki, onceki_gercek_bitis)
                     
-                    if (simdiki['Baslama'] - onceki['Bitis']) <= timedelta(minutes=tolerans_dk):
+                    if (simdiki['Baslama'] - onceki_gercek_bitis) <= timedelta(minutes=tolerans_dk):
                         temp.append(simdiki)
                     else:
                         # Yeni grup
@@ -132,13 +135,27 @@ class KesintiAnaliz:
         return df_sonuc
     
     def _tolerans_hesapla(self, kesinti):
-        """Kesinti süresine göre tolerans hesapla."""
+        """Kesinti süresine göre tolerans hesapla (satır bitişi ile)."""
         kritik_saat = self.tolerans_ayarlari.get('kritik_saat', 9)
         tolerans_ustu = self.tolerans_ayarlari.get('tolerans_ustu_dk', 60)
         tolerans_alti = self.tolerans_ayarlari.get('tolerans_alti_dk', 15)
         
         # Kesinti süresini saat cinsinden hesapla
         sure_saat = (kesinti['Bitis'] - kesinti['Baslama']).total_seconds() / 3600
+        
+        if sure_saat >= kritik_saat:
+            return tolerans_ustu
+        else:
+            return tolerans_alti
+    
+    def _tolerans_hesapla_gercek_bitis(self, kesinti, gercek_bitis):
+        """Kesinti süresine göre tolerans hesapla (gerçek/maksimum bitiş ile)."""
+        kritik_saat = self.tolerans_ayarlari.get('kritik_saat', 9)
+        tolerans_ustu = self.tolerans_ayarlari.get('tolerans_ustu_dk', 60)
+        tolerans_alti = self.tolerans_ayarlari.get('tolerans_alti_dk', 15)
+        
+        # Kesinti süresini GERÇEK bitiş ile hesapla
+        sure_saat = (gercek_bitis - kesinti['Baslama']).total_seconds() / 3600
         
         if sure_saat >= kritik_saat:
             return tolerans_ustu
@@ -152,9 +169,12 @@ class KesintiAnaliz:
         ic_ice, ard_arda = False, False
         
         for i in range(1, len(temp)):
-            fark = (temp[i]['Baslama'] - temp[i - 1]['Bitis']).total_seconds() / 60
-            # Önceki kesintinin toleransını hesapla
-            tolerans_dk = self._tolerans_hesapla(temp[i - 1])
+            # Önceki kesintinin GERÇEK bitiş zamanını al
+            onceki_gercek_bitis = self.kesinti_max_bitis.get(temp[i - 1]['KesintiNo'], temp[i - 1]['Bitis'])
+            
+            fark = (temp[i]['Baslama'] - onceki_gercek_bitis).total_seconds() / 60
+            # Önceki kesintinin toleransını hesapla (gerçek bitiş ile)
+            tolerans_dk = self._tolerans_hesapla_gercek_bitis(temp[i - 1], onceki_gercek_bitis)
             
             if fark <= 0:
                 ic_ice = True
@@ -356,8 +376,11 @@ class KesintiAnaliz:
                     temp = [simdiki]
                     continue
                 
-                # Kesinti süresini hesapla (önceki)
-                onceki_sure_saat = (onceki['Bitis'] - onceki['Baslama']).total_seconds() / 3600
+                # Önceki kesintinin GERÇEK (maksimum) bitiş zamanını al
+                onceki_gercek_bitis = self.kesinti_max_bitis.get(onceki['KesintiNo'], onceki['Bitis'])
+                
+                # Kesinti süresini hesapla (gerçek bitiş ile)
+                onceki_sure_saat = (onceki_gercek_bitis - onceki['Baslama']).total_seconds() / 3600
                 
                 # Toleransı belirle
                 if onceki_sure_saat >= kritik_saat:
@@ -365,8 +388,8 @@ class KesintiAnaliz:
                 else:
                     tolerans = tolerans_alti
                 
-                # Ard arda kontrolü
-                fark_dakika = (simdiki['Baslama'] - onceki['Bitis']).total_seconds() / 60
+                # Ard arda kontrolü (gerçek bitiş ile)
+                fark_dakika = (simdiki['Baslama'] - onceki_gercek_bitis).total_seconds() / 60
                 
                 if 0 < fark_dakika <= tolerans:
                     temp.append(simdiki)
@@ -387,10 +410,11 @@ class KesintiAnaliz:
         elemanlar = temp
         elemanlar.sort(key=lambda x: x['Baslama'])
         
-        # Farkları hesapla
+        # Farkları hesapla (gerçek bitiş ile)
         farklar = []
         for i in range(1, len(elemanlar)):
-            fark = (elemanlar[i]['Baslama'] - elemanlar[i-1]['Bitis']).total_seconds() / 60
+            onceki_gercek_bitis = self.kesinti_max_bitis.get(elemanlar[i-1]['KesintiNo'], elemanlar[i-1]['Bitis'])
+            fark = (elemanlar[i]['Baslama'] - onceki_gercek_bitis).total_seconds() / 60
             farklar.append(round(fark, 1))
         
         # En erken başlama ve en geç bitiş
