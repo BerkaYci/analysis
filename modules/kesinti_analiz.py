@@ -91,24 +91,30 @@ class KesintiAnaliz:
             temp = [grup.iloc[0].to_dict()]
             
             for i in range(1, len(grup)):
-                onceki = temp[-1]
                 simdiki = grup.iloc[i].to_dict()
                 
                 # Aynı kesinti no ard arda / iç içe sayılmaz
-                if simdiki['KesintiNo'] == onceki['KesintiNo']:
+                # Gruptaki son eklenen kesinti ile aynı no ise
+                if simdiki['KesintiNo'] == temp[-1]['KesintiNo']:
                     sonuc_list.extend(self._zincir_olustur(temp, unsur))
                     temp = [simdiki]
                     continue
                 
-                # İç içe
-                if simdiki['Baslama'] <= onceki['Bitis']:
+                # Gruptaki TÜM kesintilerin maksimum bitiş zamanını bul
+                grup_max_bitis = max(x['Bitis'] for x in temp)
+                
+                # En son biten kesinti (tolerans hesabı için)
+                en_son_biten = max(temp, key=lambda x: x['Bitis'])
+                
+                # İç içe (gruptaki herhangi bir kesinti hala devam ediyorsa)
+                if simdiki['Baslama'] <= grup_max_bitis:
                     temp.append(simdiki)
                 # Ard arda (dinamik tolerans)
                 else:
-                    # Önceki kesintinin süresine göre tolerans belirle
-                    tolerans_dk = self._tolerans_hesapla(onceki)
+                    # En son biten kesintinin süresine göre tolerans belirle
+                    tolerans_dk = self._tolerans_hesapla(en_son_biten)
                     
-                    if (simdiki['Baslama'] - onceki['Bitis']) <= timedelta(minutes=tolerans_dk):
+                    if (simdiki['Baslama'] - grup_max_bitis) <= timedelta(minutes=tolerans_dk):
                         temp.append(simdiki)
                     else:
                         # Yeni grup
@@ -341,34 +347,40 @@ class KesintiAnaliz:
             temp = [tm_grup.iloc[0].to_dict()]
             
             for i in range(1, len(tm_grup)):
-                onceki = temp[-1]
                 simdiki = tm_grup.iloc[i].to_dict()
                 
                 # Aynı kesinti no'yu atla
-                if simdiki['KesintiNo'] == onceki['KesintiNo']:
+                if simdiki['KesintiNo'] == temp[-1]['KesintiNo']:
                     sonuc_list.extend(self._tm_zincir_olustur(temp, tm_no))
                     temp = [simdiki]
                     continue
                 
                 # Aynı Şebeke Unsuru varsa atla (normal analiz kapsar)
-                if simdiki['SebekeUnsuru'] == onceki['SebekeUnsuru']:
+                if simdiki['SebekeUnsuru'] == temp[-1]['SebekeUnsuru']:
                     sonuc_list.extend(self._tm_zincir_olustur(temp, tm_no))
                     temp = [simdiki]
                     continue
                 
-                # Kesinti süresini hesapla (önceki)
-                onceki_sure_saat = (onceki['Bitis'] - onceki['Baslama']).total_seconds() / 3600
+                # Gruptaki TÜM kesintilerin maksimum bitiş zamanını bul
+                grup_max_bitis = max(x['Bitis'] for x in temp)
+                
+                # En son biten kesinti (tolerans hesabı için)
+                en_son_biten = max(temp, key=lambda x: x['Bitis'])
+                
+                # Kesinti süresini hesapla (en son biten)
+                en_son_sure_saat = (en_son_biten['Bitis'] - en_son_biten['Baslama']).total_seconds() / 3600
                 
                 # Toleransı belirle
-                if onceki_sure_saat >= kritik_saat:
+                if en_son_sure_saat >= kritik_saat:
                     tolerans = tolerans_ustu
                 else:
                     tolerans = tolerans_alti
                 
-                # Ard arda kontrolü
-                fark_dakika = (simdiki['Baslama'] - onceki['Bitis']).total_seconds() / 60
+                # Fark hesapla (grup maksimum bitişe göre)
+                fark_dakika = (simdiki['Baslama'] - grup_max_bitis).total_seconds() / 60
                 
-                if 0 < fark_dakika <= tolerans:
+                # İç içe (fark <= 0) veya ard arda (0 < fark <= tolerans)
+                if fark_dakika <= 0 or (0 < fark_dakika <= tolerans):
                     temp.append(simdiki)
                 else:
                     sonuc_list.extend(self._tm_zincir_olustur(temp, tm_no))
